@@ -1,0 +1,6 @@
+kmscube (0.0.1+20121024-3) precise; urgency=low
+
+  * Initial debianization
+
+ -- Nicolas Dechesne <n-dechesne@ti.com>  Wed, 24 Oct 2012 16:18:19 +0000
+
