@@ -28,3 +28,11 @@ depcomp
 kmscube
 tags
 TAGS
+/build-aux/
+/debian/autoreconf.after
+/debian/autoreconf.before
+/debian/files
+/debian/*.debhelper.log
+/debian/*.substvars
+/debian/stamp-*
+/m4/
