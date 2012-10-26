@@ -16,7 +16,7 @@ Vcs-Git: git://gitorious.org/ubuntu-omap/kmscube.git
 Homepage: https://github.com/robclark/kmscube
 
 Package: kmscube
-Architecture: armhf
+Architecture: any
 Section: utils
 Priority: optional
 Depends: ${shlibs:Depends},
