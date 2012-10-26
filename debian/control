@@ -7,11 +7,10 @@ Build-Depends: cdbs,
                libtool,
                pkg-config,
                dh-autoreconf,
-               libwayland-dev,
                libgbm-dev,
                libdrm-dev (>= 2.4.39),
-               libegl1-sgx-omap4-dev,
-               libgles2-sgx-omap4-dev
+               libegl1-mesa-dev,
+               libgles2-mesa-dev
 Standards-Version: 3.9.2
 Vcs-Git: git://gitorious.org/ubuntu-omap/kmscube.git
 Homepage: https://github.com/robclark/kmscube
