@@ -1,3 +1,12 @@
+kmscube (0.0.1+20121024-4) precise; urgency=low
+
+  * Add more entries to gitignore
+  * Depend on recent libgbm >= 9
+  * Allow any architecture
+  * Do not depend on omap specific libraries
+
+ -- Vincent Stehlé <v-stehle@ti.com>  Fri, 26 Oct 2012 14:34:59 +0200
+
 kmscube (0.0.1+20121024-3) precise; urgency=low
 
   * Initial debianization
