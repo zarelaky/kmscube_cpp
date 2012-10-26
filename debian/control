@@ -7,7 +7,7 @@ Build-Depends: cdbs,
                libtool,
                pkg-config,
                dh-autoreconf,
-               libgbm-dev,
+               libgbm-dev (>= 9),
                libdrm-dev (>= 2.4.39),
                libegl1-mesa-dev,
                libgles2-mesa-dev
