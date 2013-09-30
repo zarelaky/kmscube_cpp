@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2012 Arvin Schnell <arvin.schnell@gmail.com>
  * Copyright (c) 2012 Rob Clark <rob@ti.com>
+ * Copyright (c) 2013 Anand Balagopalakrishnan <anandb@ti.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -38,9 +39,11 @@
 
 #include "esUtil.h"
 
-
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
+#define MAX_DISPLAYS 	(4)
+uint8_t DISP_ID = 0;
+uint8_t all_display = 0;
 
 static struct {
 	EGLDisplay display;
@@ -60,9 +63,11 @@ static struct {
 
 static struct {
 	int fd;
-	drmModeModeInfo *mode;
-	uint32_t crtc_id;
-	uint32_t connector_id;
+	uint32_t ndisp;
+	uint32_t crtc_id[MAX_DISPLAYS];
+	uint32_t connector_id[MAX_DISPLAYS];
+	drmModeModeInfo *mode[MAX_DISPLAYS];
+	drmModeConnector *connectors[MAX_DISPLAYS];
 } drm;
 
 struct drm_fb {
@@ -73,12 +78,12 @@ struct drm_fb {
 static int init_drm(void)
 {
 	static const char *modules[] = {
-			"i915", "radeon", "nouveau", "vmwgfx", "omapdrm", "exynos"
+			"omapdrm", "i915", "radeon", "nouveau", "vmwgfx", "exynos"
 	};
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
 	drmModeEncoder *encoder = NULL;
-	int i, area;
+	int i, j;
 
 	for (i = 0; i < ARRAY_SIZE(modules); i++) {
 		printf("trying to load module %s...", modules[i]);
@@ -106,52 +111,45 @@ static int init_drm(void)
 	for (i = 0; i < resources->count_connectors; i++) {
 		connector = drmModeGetConnector(drm.fd, resources->connectors[i]);
 		if (connector->connection == DRM_MODE_CONNECTED) {
-			/* it's connected, let's use this! */
-			break;
+			/* choose the last supported mode */
+			drm.mode[drm.ndisp] = &connector->modes[connector->count_modes-1];
+			drm.connector_id[drm.ndisp] = connector->connector_id;
+
+			for (j=0; j<resources->count_encoders; j++) {
+				encoder = drmModeGetEncoder(drm.fd, resources->encoders[j]);
+				if (encoder->encoder_id == connector->encoder_id)
+					break;
+
+				drmModeFreeEncoder(encoder);
+				encoder = NULL;
+			}
+
+			if (!encoder) {
+				printf("no encoder!\n");
+				return -1;
+			}
+
+			drm.crtc_id[drm.ndisp] = encoder->crtc_id;
+			drm.connectors[drm.ndisp] = connector;
+
+			printf("### Display [%d]: CRTC = %d, Connector = %d\n", drm.ndisp, drm.crtc_id[drm.ndisp], drm.connector_id[drm.ndisp]);
+			printf("\tMode chosen [%s] : Clock => %d, Vertical refresh => %d, Type => %d\n", drm.mode[drm.ndisp]->name, drm.mode[drm.ndisp]->clock, drm.mode[drm.ndisp]->vrefresh, drm.mode[drm.ndisp]->type);
+			printf("\tHorizontal => %d, %d, %d, %d, %d\n", drm.mode[drm.ndisp]->hdisplay, drm.mode[drm.ndisp]->hsync_start, drm.mode[drm.ndisp]->hsync_end, drm.mode[drm.ndisp]->htotal, drm.mode[drm.ndisp]->hskew);
+			printf("\tVertical => %d, %d, %d, %d, %d\n", drm.mode[drm.ndisp]->vdisplay, drm.mode[drm.ndisp]->vsync_start, drm.mode[drm.ndisp]->vsync_end, drm.mode[drm.ndisp]->vtotal, drm.mode[drm.ndisp]->vscan);
+
+			drm.ndisp++;
+		} else {
+			drmModeFreeConnector(connector);
 		}
-		drmModeFreeConnector(connector);
-		connector = NULL;
 	}
 
-	if (!connector) {
+	if (drm.ndisp == 0) {
 		/* we could be fancy and listen for hotplug events and wait for
 		 * a connector..
 		 */
 		printf("no connected connector!\n");
 		return -1;
 	}
-
-	/* find highest resolution mode: */
-	for (i = 0, area = 0; i < connector->count_modes; i++) {
-		drmModeModeInfo *current_mode = &connector->modes[i];
-		int current_area = current_mode->hdisplay * current_mode->vdisplay;
-		if (current_area > area) {
-			drm.mode = current_mode;
-			area = current_area;
-		}
-	}
-
-	if (!drm.mode) {
-		printf("could not find mode!\n");
-		return -1;
-	}
-
-	/* find encoder: */
-	for (i = 0; i < resources->count_encoders; i++) {
-		encoder = drmModeGetEncoder(drm.fd, resources->encoders[i]);
-		if (encoder->encoder_id == connector->encoder_id)
-			break;
-		drmModeFreeEncoder(encoder);
-		encoder = NULL;
-	}
-
-	if (!encoder) {
-		printf("no encoder!\n");
-		return -1;
-	}
-
-	drm.crtc_id = encoder->crtc_id;
-	drm.connector_id = connector->connector_id;
 
 	return 0;
 }
@@ -161,7 +159,7 @@ static int init_gbm(void)
 	gbm.dev = gbm_create_device(drm.fd);
 
 	gbm.surface = gbm_surface_create(gbm.dev,
-			drm.mode->hdisplay, drm.mode->vdisplay,
+			drm.mode[DISP_ID]->hdisplay, drm.mode[DISP_ID]->vdisplay,
 			GBM_FORMAT_XRGB8888,
 			GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 	if (!gbm.surface) {
@@ -441,7 +439,7 @@ static int init_gl(void)
 	gl.modelviewprojectionmatrix = glGetUniformLocation(gl.program, "modelviewprojectionMatrix");
 	gl.normalmatrix = glGetUniformLocation(gl.program, "normalMatrix");
 
-	glViewport(0, 0, drm.mode->hdisplay, drm.mode->vdisplay);
+	glViewport(0, 0, drm.mode[DISP_ID]->hdisplay, drm.mode[DISP_ID]->vdisplay);
 	glEnable(GL_CULL_FACE);
 
 	gl.positionsoffset = 0;
@@ -477,7 +475,7 @@ static void draw(uint32_t i)
 	esRotate(&modelview, 45.0f - (0.5f * i), 0.0f, 1.0f, 0.0f);
 	esRotate(&modelview, 10.0f + (0.15f * i), 0.0f, 0.0f, 1.0f);
 
-	GLfloat aspect = (GLfloat)(drm.mode->vdisplay) / (GLfloat)(drm.mode->hdisplay);
+	GLfloat aspect = (GLfloat)(drm.mode[DISP_ID]->vdisplay) / (GLfloat)(drm.mode[DISP_ID]->hdisplay);
 
 	ESMatrix projection;
 	esMatrixLoadIdentity(&projection);
@@ -570,6 +568,18 @@ int main(int argc, char *argv[])
 	uint32_t i = 0;
 	int ret;
 
+	if (argc > 1) {
+		if (strcmp(argv[1], "--all") == 0) 
+			all_display = 1;
+		else if (strcmp(argv[1], "-h") == 0)
+			printf("Usage: %s [ --all | <0|1|..> ] \n", argv[0]);
+		else
+			DISP_ID = atoi(argv[1]);
+	}
+
+	if (all_display) 
+		printf("### Enabling all displays\n");
+
 	ret = init_drm();
 	if (ret) {
 		printf("failed to initialize DRM\n");
@@ -600,11 +610,22 @@ int main(int argc, char *argv[])
 	fb = drm_fb_get_from_bo(bo);
 
 	/* set mode: */
-	ret = drmModeSetCrtc(drm.fd, drm.crtc_id, fb->fb_id, 0, 0,
-			&drm.connector_id, 1, drm.mode);
-	if (ret) {
-		printf("failed to set mode: %s\n", strerror(errno));
-		return ret;
+	if (all_display) {
+		for (i=0; i<drm.ndisp; i++) {
+			ret = drmModeSetCrtc(drm.fd, drm.crtc_id[i], fb->fb_id, 0, 0,
+					&drm.connector_id[i], 1, drm.mode[i]);
+			if (ret) {
+				printf("display %d failed to set mode: %s\n", i, strerror(errno));
+				return ret;
+			}
+		}
+	} else {
+		ret = drmModeSetCrtc(drm.fd, drm.crtc_id[DISP_ID], fb->fb_id,
+				0, 0, &drm.connector_id[DISP_ID], 1, drm.mode[DISP_ID]);
+		if (ret) {
+			printf("display %d failed to set mode: %s\n", DISP_ID, strerror(errno));
+			return ret;
+		}
 	}
 
 	while (1) {
@@ -622,7 +643,7 @@ int main(int argc, char *argv[])
 		 * hw composition
 		 */
 
-		ret = drmModePageFlip(drm.fd, drm.crtc_id, fb->fb_id,
+		ret = drmModePageFlip(drm.fd, drm.crtc_id[DISP_ID], fb->fb_id,
 				DRM_MODE_PAGE_FLIP_EVENT, &waiting_for_flip);
 		if (ret) {
 			printf("failed to queue page flip: %s\n", strerror(errno));
