@@ -31,6 +31,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
 
 #include <xf86drm.h>
@@ -44,6 +45,7 @@
 #define MAX_DISPLAYS 	(4)
 uint8_t DISP_ID = 0;
 uint8_t all_display = 0;
+int8_t connector_id = -1;
 
 static struct {
 	EGLDisplay display;
@@ -84,6 +86,7 @@ static int init_drm(void)
 	drmModeConnector *connector = NULL;
 	drmModeEncoder *encoder = NULL;
 	int i, j;
+	uint32_t maxRes, curRes;
 
 	for (i = 0; i < ARRAY_SIZE(modules); i++) {
 		printf("trying to load module %s...", modules[i]);
@@ -111,8 +114,8 @@ static int init_drm(void)
 	for (i = 0; i < resources->count_connectors; i++) {
 		connector = drmModeGetConnector(drm.fd, resources->connectors[i]);
 		if (connector->connection == DRM_MODE_CONNECTED) {
-			/* choose the last supported mode */
-			drm.mode[drm.ndisp] = &connector->modes[connector->count_modes-1];
+			/* choose the first supported mode */
+			drm.mode[drm.ndisp] = &connector->modes[0];
 			drm.connector_id[drm.ndisp] = connector->connector_id;
 
 			for (j=0; j<resources->count_encoders; j++) {
@@ -136,6 +139,20 @@ static int init_drm(void)
 			printf("\tMode chosen [%s] : Clock => %d, Vertical refresh => %d, Type => %d\n", drm.mode[drm.ndisp]->name, drm.mode[drm.ndisp]->clock, drm.mode[drm.ndisp]->vrefresh, drm.mode[drm.ndisp]->type);
 			printf("\tHorizontal => %d, %d, %d, %d, %d\n", drm.mode[drm.ndisp]->hdisplay, drm.mode[drm.ndisp]->hsync_start, drm.mode[drm.ndisp]->hsync_end, drm.mode[drm.ndisp]->htotal, drm.mode[drm.ndisp]->hskew);
 			printf("\tVertical => %d, %d, %d, %d, %d\n", drm.mode[drm.ndisp]->vdisplay, drm.mode[drm.ndisp]->vsync_start, drm.mode[drm.ndisp]->vsync_end, drm.mode[drm.ndisp]->vtotal, drm.mode[drm.ndisp]->vscan);
+
+			/* If a connector_id is specified, use the corresponding display */
+			if ((connector_id != -1) && (connector_id == drm.connector_id[drm.ndisp]))
+				DISP_ID = drm.ndisp;
+
+			/* If all displays are enabled, choose the connector with maximum
+			* resolution as the primary display */
+			if (all_display) {
+				maxRes = drm.mode[DISP_ID]->vdisplay * drm.mode[DISP_ID]->hdisplay;
+				curRes = drm.mode[drm.ndisp]->vdisplay * drm.mode[drm.ndisp]->hdisplay;
+
+				if (curRes > maxRes)
+					DISP_ID = drm.ndisp;
+			}
 
 			drm.ndisp++;
 		} else {
@@ -556,6 +573,14 @@ static void page_flip_handler(int fd, unsigned int frame,
 	*waiting_for_flip = 0;
 }
 
+void print_usage()
+{
+	printf("Usage : kmscube <options>\n");
+	printf("\t-h : Help\n");
+	printf("\t-a : Enable all displays\n");
+	printf("\t-c <id> : Display using connector_id [if not specified, use the first connected connector]\n");
+}
+
 int main(int argc, char *argv[])
 {
 	fd_set fds;
@@ -567,24 +592,42 @@ int main(int argc, char *argv[])
 	struct drm_fb *fb;
 	uint32_t i = 0;
 	int ret;
+	int opt;
 
-	if (argc > 1) {
-		if (strcmp(argv[1], "--all") == 0) 
+	while ((opt = getopt(argc, argv, "ahc:")) != -1) {
+		switch(opt) {
+		case 'a':
 			all_display = 1;
-		else if (strcmp(argv[1], "-h") == 0)
-			printf("Usage: %s [ --all | <0|1|..> ] \n", argv[0]);
-		else
-			DISP_ID = atoi(argv[1]);
+			break;
+
+		case 'h':
+			print_usage();
+			return 0;
+
+		case 'c':
+			connector_id = atoi(optarg);
+			break;
+
+		default:
+			printf("Undefined option %s\n", argv[optind]);
+			print_usage();
+			return -1;
+		}
 	}
 
-	if (all_display) 
+	if (all_display) {
 		printf("### Enabling all displays\n");
+		connector_id = -1;
+	}
 
 	ret = init_drm();
 	if (ret) {
 		printf("failed to initialize DRM\n");
 		return ret;
 	}
+	printf("### Primary display => ConnectorId = %d, Resolution = %dx%d\n",
+			drm.connector_id[DISP_ID], drm.mode[DISP_ID]->hdisplay,
+			drm.mode[DISP_ID]->vdisplay);
 
 	FD_ZERO(&fds);
 	FD_SET(0, &fds);
