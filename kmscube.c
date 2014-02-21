@@ -630,7 +630,6 @@ int main(int argc, char *argv[])
 			drm.mode[DISP_ID]->vdisplay);
 
 	FD_ZERO(&fds);
-	FD_SET(0, &fds);
 	FD_SET(drm.fd, &fds);
 
 	ret = init_gbm();
@@ -702,8 +701,7 @@ int main(int argc, char *argv[])
 				printf("select timeout!\n");
 				return -1;
 			} else if (FD_ISSET(0, &fds)) {
-				printf("user interrupted!\n");
-				break;
+				continue;
 			}
 			drmHandleEvent(drm.fd, &evctx);
 		}
