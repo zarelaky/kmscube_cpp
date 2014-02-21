@@ -56,6 +56,7 @@ static struct {
 	GLint modelviewmatrix, modelviewprojectionmatrix, normalmatrix;
 	GLuint vbo;
 	GLuint positionsoffset, colorsoffset, normalsoffset;
+	GLuint vertex_shader, fragment_shader;
 } gl;
 
 static struct {
@@ -68,6 +69,8 @@ static struct {
 	uint32_t ndisp;
 	uint32_t crtc_id[MAX_DISPLAYS];
 	uint32_t connector_id[MAX_DISPLAYS];
+	uint32_t resource_id;
+	uint32_t encoder[MAX_DISPLAYS];
 	drmModeModeInfo *mode[MAX_DISPLAYS];
 	drmModeConnector *connectors[MAX_DISPLAYS];
 } drm;
@@ -109,6 +112,7 @@ static int init_drm(void)
 		printf("drmModeGetResources failed: %s\n", strerror(errno));
 		return -1;
 	}
+	drm.resource_id = (uint32_t) resources;
 
 	/* find a connected connector: */
 	for (i = 0; i < resources->count_connectors; i++) {
@@ -132,6 +136,7 @@ static int init_drm(void)
 				return -1;
 			}
 
+			drm.encoder[drm.ndisp]  = (uint32_t) encoder;
 			drm.crtc_id[drm.ndisp] = encoder->crtc_id;
 			drm.connectors[drm.ndisp] = connector;
 
@@ -190,7 +195,6 @@ static int init_gbm(void)
 static int init_gl(void)
 {
 	EGLint major, minor, n;
-	GLuint vertex_shader, fragment_shader;
 	GLint ret;
 
 	static const GLfloat vVertices[] = {
@@ -382,41 +386,41 @@ static int init_gl(void)
 	eglMakeCurrent(gl.display, gl.surface, gl.surface, gl.context);
 
 
-	vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+	gl.vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
-	glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
-	glCompileShader(vertex_shader);
+	glShaderSource(gl.vertex_shader, 1, &vertex_shader_source, NULL);
+	glCompileShader(gl.vertex_shader);
 
-	glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &ret);
+	glGetShaderiv(gl.vertex_shader, GL_COMPILE_STATUS, &ret);
 	if (!ret) {
 		char *log;
 
 		printf("vertex shader compilation failed!:\n");
-		glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &ret);
+		glGetShaderiv(gl.vertex_shader, GL_INFO_LOG_LENGTH, &ret);
 		if (ret > 1) {
 			log = malloc(ret);
-			glGetShaderInfoLog(vertex_shader, ret, NULL, log);
+			glGetShaderInfoLog(gl.vertex_shader, ret, NULL, log);
 			printf("%s", log);
 		}
 
 		return -1;
 	}
 
-	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+	gl.fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 
-	glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
-	glCompileShader(fragment_shader);
+	glShaderSource(gl.fragment_shader, 1, &fragment_shader_source, NULL);
+	glCompileShader(gl.fragment_shader);
 
-	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &ret);
+	glGetShaderiv(gl.fragment_shader, GL_COMPILE_STATUS, &ret);
 	if (!ret) {
 		char *log;
 
 		printf("fragment shader compilation failed!:\n");
-		glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &ret);
+		glGetShaderiv(gl.fragment_shader, GL_INFO_LOG_LENGTH, &ret);
 
 		if (ret > 1) {
 			log = malloc(ret);
-			glGetShaderInfoLog(fragment_shader, ret, NULL, log);
+			glGetShaderInfoLog(gl.fragment_shader, ret, NULL, log);
 			printf("%s", log);
 		}
 
@@ -425,8 +429,8 @@ static int init_gl(void)
 
 	gl.program = glCreateProgram();
 
-	glAttachShader(gl.program, vertex_shader);
-	glAttachShader(gl.program, fragment_shader);
+	glAttachShader(gl.program, gl.vertex_shader);
+	glAttachShader(gl.program, gl.fragment_shader);
 
 	glBindAttribLocation(gl.program, 0, "in_position");
 	glBindAttribLocation(gl.program, 1, "in_normal");
@@ -476,6 +480,50 @@ static int init_gl(void)
 	glEnableVertexAttribArray(2);
 
 	return 0;
+}
+
+static void exit_gbm(void)
+{
+        gbm_surface_destroy(gbm.surface);
+        gbm_device_destroy(gbm.dev);
+        return;
+}
+
+static void exit_gl(void)
+{
+        glDeleteProgram(gl.program);
+        glDeleteBuffers(1, &gl.vbo);
+        glDeleteShader(gl.fragment_shader);
+        glDeleteShader(gl.vertex_shader);
+        eglDestroySurface(gl.display, gl.surface);
+        eglDestroyContext(gl.display, gl.context);
+        eglTerminate(gl.display);
+        return;
+}
+
+static void exit_drm(void)
+{
+
+        drmModeRes *resources;
+        int i;
+
+        resources = (drmModeRes *)drm.resource_id;
+        for (i = 0; i < resources->count_connectors; i++) {
+                drmModeFreeEncoder(drm.encoder[i]);
+                drmModeFreeConnector(drm.connectors[i]);
+        }
+        drmModeFreeResources(drm.resource_id);
+        drmClose(drm.fd);
+        return;
+}
+
+void cleanup_kmscube(void)
+{
+	exit_gl();
+	exit_gbm();
+	exit_drm();
+	printf("Cleanup of GL, GBM and DRM completed\n");
+	return;
 }
 
 static void draw(uint32_t i)
@@ -710,6 +758,9 @@ int main(int argc, char *argv[])
 		gbm_surface_release_buffer(gbm.surface, bo);
 		bo = next_bo;
 	}
+
+	cleanup_kmscube();
+	printf("\n Exiting kmscube \n");
 
 	return ret;
 }
