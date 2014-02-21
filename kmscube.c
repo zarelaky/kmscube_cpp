@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -629,6 +630,21 @@ void print_usage()
 	printf("\t-c <id> : Display using connector_id [if not specified, use the first connected connector]\n");
 }
 
+int kms_signalhandler(int signum)
+{
+	switch(signum) {
+	case SIGINT:
+	case SIGTERM:
+		printf("Handling signal number = %d\n", signum);
+		cleanup_kmscube();
+		break;
+	default:
+		printf("Unknown signal\n");
+		break;
+	}
+	exit(1);
+}
+
 int main(int argc, char *argv[])
 {
 	fd_set fds;
@@ -641,6 +657,9 @@ int main(int argc, char *argv[])
 	uint32_t i = 0;
 	int ret;
 	int opt;
+
+	signal(SIGINT, kms_signalhandler);
+	signal(SIGTERM, kms_signalhandler);
 
 	while ((opt = getopt(argc, argv, "ahc:")) != -1) {
 		switch(opt) {
