@@ -628,14 +628,18 @@ void print_usage()
 	printf("\t-h : Help\n");
 	printf("\t-a : Enable all displays\n");
 	printf("\t-c <id> : Display using connector_id [if not specified, use the first connected connector]\n");
+	printf("\t-n <number> (optional): Number of frames to render\n");
 }
 
 int kms_signalhandler(int signum)
 {
 	switch(signum) {
 	case SIGINT:
-	case SIGTERM:
-		printf("Handling signal number = %d\n", signum);
+        case SIGTERM:
+                /* Allow the pending page flip requests to be completed before
+                 * the teardown sequence */
+                sleep(1);
+                printf("Handling signal number = %d\n", signum);
 		cleanup_kmscube();
 		break;
 	default:
@@ -657,11 +661,12 @@ int main(int argc, char *argv[])
 	uint32_t i = 0;
 	int ret;
 	int opt;
+	int frame_count = -1;
 
 	signal(SIGINT, kms_signalhandler);
 	signal(SIGTERM, kms_signalhandler);
 
-	while ((opt = getopt(argc, argv, "ahc:")) != -1) {
+	while ((opt = getopt(argc, argv, "ahc:n:")) != -1) {
 		switch(opt) {
 		case 'a':
 			all_display = 1;
@@ -674,6 +679,10 @@ int main(int argc, char *argv[])
 		case 'c':
 			connector_id = atoi(optarg);
 			break;
+		case 'n':
+			frame_count = atoi(optarg);
+			break;
+
 
 		default:
 			printf("Undefined option %s\n", argv[optind]);
@@ -737,7 +746,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	while (1) {
+	while (frame_count != 0) {
 		struct gbm_bo *next_bo;
 		int waiting_for_flip = 1;
 
@@ -776,6 +785,9 @@ int main(int argc, char *argv[])
 		/* release last buffer to render on again: */
 		gbm_surface_release_buffer(gbm.surface, bo);
 		bo = next_bo;
+
+                if(frame_count >= 0)
+		        frame_count--;
 	}
 
 	cleanup_kmscube();
