@@ -3,4 +3,4 @@ do
     rm -rf $i;
 done
 
-rm install_manifest.txt
+rm kmscube
